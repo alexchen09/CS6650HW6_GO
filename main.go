@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 )
 
 // We'll store a global *sql.DB for simplicity in a demo.
@@ -32,41 +33,81 @@ func main() {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
-	db.Exec(`
-	CREATE TABLE IF NOT EXISTS test_table (
-		id INT AUTO_INCREMENT PRIMARY KEY,
-		some_value INT
+	// Create table if not exists
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS new_table (
+		albumID VARCHAR(255) PRIMARY KEY,
+		name VARCHAR(255),
+		artist VARCHAR(255),
+		price FLOAT,
+		image BLOB
 	) ENGINE=InnoDB;
 	`)
+	if err != nil {
+		log.Fatalf("Failed to create table: %v", err)
+	}
 
 	// Setup Gin engine
 	r := gin.Default()
 
 	// Health check route
-	r.GET("/health", func(c *gin.Context) {
+	r.GET("/count", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	// GET /count -> returns row count in "test_table"
-	r.GET("/count", func(c *gin.Context) {
-		var cnt int
-		row := db.QueryRow("SELECT COUNT(*) FROM test_table")
-		if err := row.Scan(&cnt); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, gin.H{"row_count": cnt})
+	// GET /album/:albumID -> returns album details
+	r.GET("/album/:albumID", func(c *gin.Context) {
+    albumID := c.Param("albumID")
+		log.Printf("Received GET request for albumID: %s", albumID)
+    var album struct {
+        AlbumID string  `json:"albumID"`
+        Name    string  `json:"name"`
+        Artist  string  `json:"artist"`
+        Price   float64 `json:"price"`
+        Image   []byte  `json:"image"`
+    }
+
+    query := "SELECT albumID FROM new_table WHERE albumID = ?"
+    row := db.QueryRow(query, albumID)
+    err := row.Scan(&album.AlbumID)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            c.JSON(404, gin.H{"message": "Album not found"})
+        } else {
+            c.JSON(500, gin.H{"message": "Error fetching album"})
+        }
+        return
+    }
+
+    c.JSON(200, gin.H{"albumID": album.AlbumID})  
 	})
 
-	// POST /insert -> inserts a row with some random value
-	r.POST("/insert", func(c *gin.Context) {
-		res, err := db.Exec("INSERT INTO test_table (some_value) VALUES (FLOOR(RAND()*1000))")
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+
+	// POST /add -> insert new album
+	r.POST("/add", func(c *gin.Context) {
+		var newAlbum struct {
+			Name   string  `json:"name"`
+			Artist string  `json:"artist"`
+			Price  float64 `json:"price"`
+		}
+
+		if err := c.ShouldBindJSON(&newAlbum); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid JSON data"})
 			return
 		}
-		id, _ := res.LastInsertId()
-		c.JSON(200, gin.H{"message": "inserted", "row_id": id})
+
+		// Insert album
+		query := "INSERT INTO new_table (albumID, name, artist, price) VALUES (?, ?, ?, ?)"
+		albumID := uuid.New().String()
+		_, err := db.Exec(query, albumID, newAlbum.Name, newAlbum.Artist, newAlbum.Price)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to insert album into database"})
+			return
+		}
+
+		c.JSON(201, gin.H{
+			"albumID": albumID,
+		})
 	})
 
 	// Optionally, pass a port via environment variable or default to 8080
