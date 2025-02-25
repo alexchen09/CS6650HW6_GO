@@ -35,6 +35,7 @@ func main() {
 
 	// Create table if not exists
 	_, err = db.Exec(`
+ 	DROP TABLE IF EXISTS new_table;
 	CREATE TABLE IF NOT EXISTS new_table (
 		albumID VARCHAR(255) PRIMARY KEY,
 		name VARCHAR(255),
